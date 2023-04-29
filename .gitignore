@@ -36,3 +36,9 @@
 
 # config files
 .vscode/settings.json
+
+# Mac
+.DS_Store
+
+# cache
+scripts/__pycache__

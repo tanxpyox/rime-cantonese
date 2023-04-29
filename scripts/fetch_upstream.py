@@ -1,8 +1,14 @@
+import sys
 import datetime
 import pytz
+from os.path import basename, join
 from glob import iglob
-from os.path import join
 import sys
+from operator import itemgetter
+from itertools import chain, product
+from bracket_expand import bracket_expand, punct_expand
+
+# header
 
 try:
     upstream_dir = sys.argv[1]
@@ -28,34 +34,53 @@ sort: by_weight
 '''
 
 def sort_criteria(entry):
-    word, romans, rest = entry
-    return len(word), romans, word, rest
+    char, jyutping, *rest = entry
+    return len(char), jyutping, char, *rest
+
+# char
 
 chars_list = []
+
+with open(join(upstream_dir, 'char.csv'), encoding='utf-8') as f:
+    next(f)  # skip header
+
+    for line in f:
+        char, jyutping, pron_rank, tone_var, literary_vernacular, comment = line.rstrip('\n').split(',')
+        pron_rank = {
+            '預設': '',
+            '常用': '5%',
+            '罕見': '3%',
+            '棄用': '0%',
+        }[pron_rank]
+        chars_list.append((char, jyutping, pron_rank))
+
+chars_list.sort(key=sort_criteria)
+
+with open('jyut6ping3.chars.dict.yaml', 'w', encoding='utf-8') as f:
+    print(generate_header('chars'), file=f)
+    for char, jyutping, pron_rank in chars_list:
+        line = (char, jyutping, pron_rank) if pron_rank else (char, jyutping)
+        print(*line, sep='\t', file=f)
+
+# word
+
+include_cols = ['char', 'jyutping']
 words_list = []
 
 for filename in iglob(join(upstream_dir, '*.csv')):
-    with open(filename) as f:
-        next(f)  # skip header
+    if basename(filename) != 'char.csv':
+        with open(filename, encoding='utf-8') as f:
+            cols = next(f).rstrip('\n').split(',')
+            if all(col in cols for col in include_cols):
+                select_cols = itemgetter(*map(cols.index, include_cols))
+                words_list += chain(*(chain(*map(punct_expand, product(*map(bracket_expand, select_cols(line.rstrip('\n').split(',')))))) for line in f))
 
-        for line in f:
-            word, romans, *rest = line.rstrip('\n').split(',', 3)
-
-            romans_list = romans.replace(']', '').split('[')  # handle aaa[bbb][ccc]
-
-            for romans in romans_list:
-                target_list = chars_list if len(word) == 1 else words_list
-                target_list.append((word, romans, rest))
-
-chars_list.sort(key=sort_criteria)
 words_list.sort(key=sort_criteria)
 
-with open('jyut6ping3.chars.dict.yaml', 'w') as f:
-    print(generate_header('chars'), file=f)
-    for word, romans, rest in chars_list:
-        print(word, romans, *rest, sep='\t', file=f)
-
-with open('jyut6ping3.words.dict.yaml', 'w') as f:
+with open('jyut6ping3.words.dict.yaml', 'w', encoding='utf-8') as f:
     print(generate_header('words'), file=f)
-    for word, romans, rest in words_list:
-        print(word, romans, *rest, sep='\t', file=f)
+    prev_line = None
+    for line in words_list:
+        if prev_line != line:
+            print(*line, sep='\t', file=f)
+            prev_line = line
